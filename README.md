@@ -129,6 +129,153 @@ El proyecto utiliza el patrón Repository para abstraer el acceso a datos:
 - `getAll()`: Obtiene la lista completa de Pokémon
 - `getById(id)`: Obtiene un Pokémon específico por su ID
 
+## 🧠 ViewModel y Gestión de Estado
+
+### Arquitectura MVVM Detallada
+
+Este proyecto implementa el patrón **MVVM (Model-View-ViewModel)** siguiendo las mejores prácticas de Android moderno:
+
+#### 📊 Componentes del patrón
+
+```
+┌─────────────────────┐
+│   View (UI Layer)   │  ← Composables que observan y muestran datos
+│  PokemonListScreen  │
+└──────────┬──────────┘
+           │ observa StateFlow
+           │ llama funciones
+           ▼
+┌─────────────────────┐
+│      ViewModel      │  ← Gestiona estado y lógica de negocio
+│  PokemonViewModel   │
+└──────────┬──────────┘
+           │ usa Repository
+           ▼
+┌─────────────────────┐
+│   Model (Data)      │  ← Repositorios y modelos de datos
+│  PokemonRepository  │
+└─────────────────────┘
+```
+
+### 🔄 StateFlow y UI State
+
+#### PokemonUiState (Sealed Class)
+
+El estado de la UI se representa mediante una **sealed class** que garantiza type-safety y exhaustividad:
+
+```kotlin
+sealed class PokemonUiState {
+    object Idle : PokemonUiState()                              // Estado inicial
+    object Loading : PokemonUiState()                           // Cargando datos
+    data class Success(val pokemons: List<Pokemon>) : PokemonUiState()  // Éxito con datos
+    data class Error(val message: String) : PokemonUiState()    // Error con mensaje
+}
+```
+
+**Ventajas:**
+- ✅ **Type-safe**: El compilador conoce todos los estados posibles
+- ✅ **Exhaustivo**: El `when` debe manejar todos los casos
+- ✅ **Sin estados inconsistentes**: Solo puede estar en UN estado a la vez
+
+#### StateFlow
+
+**StateFlow** es un contenedor reactivo de estado que:
+- Siempre tiene un valor actual
+- Emite actualizaciones a todos los observadores
+- Solo emite valores distintos (no duplicados)
+- Es thread-safe
+
+```kotlin
+// En el ViewModel
+private val _uiState = MutableStateFlow<PokemonUiState>(PokemonUiState.Idle)
+val uiState: StateFlow<PokemonUiState> = _uiState  // Backing property pattern
+
+// En la UI (Composable)
+val uiState by viewModel.uiState.collectAsState()
+```
+
+### ⚡ viewModelScope y Corrutinas
+
+El `PokemonViewModel` usa **corrutinas de Kotlin** para operaciones asíncronas:
+
+```kotlin
+fun loadPokemons() {
+    viewModelScope.launch {  // Scope que se cancela automáticamente
+        _uiState.value = PokemonUiState.Loading
+        delay(1000)  // Simulación de operación de red
+        try {
+            val pokemons = repository.readAll()
+            _uiState.value = PokemonUiState.Success(pokemons)
+        } catch (e: Exception) {
+            _uiState.value = PokemonUiState.Error("Error al cargar Pokémon")
+        }
+    }
+}
+```
+
+**Características clave:**
+- **viewModelScope**: Scope vinculado al ciclo de vida del ViewModel
+- **Cancelación automática**: Se cancela cuando el ViewModel se destruye
+- **try-catch**: Manejo robusto de errores
+
+### 🔁 Flujo de datos completo
+
+```
+1. Usuario abre PokemonListScreen
+   ↓
+2. LaunchedEffect llama a viewModel.loadPokemons()
+   ↓
+3. Estado cambia: Idle → Loading
+   ↓
+4. UI se recompone, muestra CircularProgressIndicator
+   ↓
+5. ViewModel obtiene datos del Repository
+   ↓
+6. Estado cambia: Loading → Success(pokemons)
+   ↓
+7. UI se recompone, muestra lista de Pokémon
+```
+
+### 📱 Uso en Composables
+
+```kotlin
+@Composable
+fun PokemonListScreen(viewModel: PokemonViewModel = viewModel()) {
+    // Observa el estado como State de Compose
+    val uiState by viewModel.uiState.collectAsState()
+    
+    // Carga inicial de datos
+    LaunchedEffect(Unit) {
+        viewModel.loadPokemons()
+    }
+    
+    // Renderiza UI según el estado
+    when (uiState) {
+        is PokemonUiState.Idle -> EmptyScreen()
+        is PokemonUiState.Loading -> LoadingScreen()
+        is PokemonUiState.Success -> PokemonList(uiState.pokemons)
+        is PokemonUiState.Error -> ErrorScreen(uiState.message)
+    }
+}
+```
+
+### 💡 Beneficios de esta arquitectura
+
+1. **Supervivencia a cambios de configuración**: Los datos persisten al rotar la pantalla
+2. **Separación de responsabilidades**: UI solo muestra, ViewModel gestiona
+3. **Testabilidad**: Lógica de negocio testeable sin Android Framework
+4. **Reactividad**: La UI se actualiza automáticamente cuando cambia el estado
+5. **Manejo de errores**: Gestión centralizada y robusta de errores
+6. **Reutilización**: El mismo ViewModel puede servir múltiples pantallas
+
+### 📚 Recursos de aprendizaje
+
+Para entender mejor el ViewModel y su implementación, consulta:
+- **[VIEWMODEL_NOTES.md](VIEWMODEL_NOTES.md)** - Apuntes detallados sobre ViewModel en español
+- Código comentado en `PokemonViewModel.kt`
+- Código comentado en `PokemonUiState.kt`
+- Código comentado en `PokemonListScreen.kt`
+
 ### Navegación
 
 La aplicación utiliza Navigation Compose con dos rutas:
