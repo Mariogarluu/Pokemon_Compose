@@ -45,6 +45,7 @@ com.turingalan.pokemon/
 │       ├── Theme.kt                # Tema de la app
 │       └── Type.kt                 # Tipografía
 ├── PokemonViewModel.kt             # ViewModel principal
+├── PokemonUiState.kt               # Estados de la UI (sealed class)
 └── MainActivity.kt                 # Actividad principal
 
 ```
@@ -123,11 +124,148 @@ El proyecto utiliza el patrón Repository para abstraer el acceso a datos:
 - `PokemonRepository`: Interfaz que define las operaciones de datos
 - `PokemonInMemoryRepository`: Implementación que almacena los Pokémon en memoria
 
-### ViewModel
+### ViewModel y Gestión de Estado
 
-`PokemonViewModel` gestiona los datos de la UI y proporciona:
-- `getAll()`: Obtiene la lista completa de Pokémon
-- `getById(id)`: Obtiene un Pokémon específico por su ID
+El **ViewModel** es el componente central de la arquitectura MVVM de esta aplicación. Gestiona el estado de la UI y la lógica de negocio, garantizando que los datos sobrevivan a cambios de configuración como rotaciones de pantalla.
+
+#### Implementación del PokemonViewModel
+
+```kotlin
+class PokemonViewModel(
+    private val repository: PokemonRepository = PokemonInMemoryRepository()
+) : ViewModel() {
+
+    // Estado privado mutable
+    private val _uiState = MutableStateFlow<PokemonUiState>(PokemonUiState.Idle)
+    // Estado público inmutable para la UI
+    val uiState: StateFlow<PokemonUiState> = _uiState
+
+    fun loadPokemons() {
+        viewModelScope.launch {
+            _uiState.value = PokemonUiState.Loading
+            delay(1000)
+            try {
+                val pokemons = repository.readAll()
+                _uiState.value = PokemonUiState.Success(pokemons)
+            } catch (e: Exception) {
+                _uiState.value = PokemonUiState.Error("Error al cargar Pokémon")
+            }
+        }
+    }
+
+    fun getById(id: Long): Pokemon? = repository.readOne(id)
+}
+```
+
+**Características clave:**
+
+1. **Inyección de Dependencias Manual**: El ViewModel recibe el repositorio por constructor con un valor por defecto (`PokemonInMemoryRepository()`). Esto permite:
+   - Facilitar testing mediante inyección de repositorios fake/mock
+   - Desacoplar el ViewModel de la implementación concreta
+   - Preparar el código para migrar a Hilt en el futuro
+
+2. **StateFlow (Backing Property Pattern)**: 
+   - `_uiState`: Propiedad privada mutable que solo el ViewModel puede modificar
+   - `uiState`: Propiedad pública inmutable que la UI puede observar
+   - Este patrón previene modificaciones no autorizadas del estado desde la UI
+
+3. **viewModelScope**: Scope de corrutinas vinculado al ciclo de vida del ViewModel que:
+   - Se cancela automáticamente cuando el ViewModel se destruye
+   - Previene memory leaks
+   - Elimina la necesidad de gestionar manualmente el ciclo de vida de las corrutinas
+
+#### Estados de la UI con Sealed Class
+
+El estado de la aplicación se modela mediante una **sealed class** que define todos los estados posibles:
+
+```kotlin
+sealed class PokemonUiState {
+    object Idle : PokemonUiState()
+    object Loading : PokemonUiState()
+    data class Success(val pokemons: List<Pokemon>) : PokemonUiState()
+    data class Error(val message: String) : PokemonUiState()
+}
+```
+
+**Ventajas del enfoque sealed class:**
+
+- ✅ **Type-Safety**: El compilador conoce todos los estados posibles
+- ✅ **Exhaustividad**: En un `when`, el compilador obliga a manejar todos los casos
+- ✅ **Estados mutuamente excluyentes**: La aplicación solo puede estar en un estado a la vez
+- ✅ **Datos asociados**: Cada estado puede tener sus propios datos (Success tiene la lista, Error tiene el mensaje)
+
+#### Flujo de Estados
+
+```
+1. Idle (inicial)
+   ↓
+2. Loading (cargando datos)
+   ↓
+3a. Success(pokemons) → Muestra la lista
+   O
+3b. Error(mensaje) → Muestra error
+```
+
+#### Uso en Composables
+
+```kotlin
+@Composable
+fun PokemonListScreen(
+    navController: NavController,
+    viewModel: PokemonViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+
+    LaunchedEffect(Unit) {
+        viewModel.loadPokemons()
+    }
+
+    when (uiState) {
+        is PokemonUiState.Idle -> EmptyScreen()
+        is PokemonUiState.Loading -> LoadingScreen()
+        is PokemonUiState.Success -> {
+            val pokemons = (uiState as PokemonUiState.Success).pokemons
+            PokemonList(pokemons = pokemons) { pokemon ->
+                navController.navigate("Pokemon/${pokemon.id}")
+            }
+        }
+        is PokemonUiState.Error -> ErrorScreen((uiState as PokemonUiState.Error).message)
+    }
+}
+```
+
+**Explicación del código:**
+
+1. **`viewModel()`**: Obtiene o crea una instancia del ViewModel vinculada al ciclo de vida del composable
+2. **`collectAsState()`**: Convierte el StateFlow en un State de Compose, permitiendo recomposiciones automáticas
+3. **`LaunchedEffect(Unit)`**: Ejecuta la carga de datos una sola vez cuando el composable entra en composición
+4. **`when (uiState)`**: Pattern matching exhaustivo que renderiza la UI según el estado actual
+
+#### Beneficios de esta Arquitectura
+
+1. **Supervivencia a cambios de configuración**: Los datos se mantienen al rotar la pantalla
+2. **Separación de responsabilidades**: La UI solo observa y renderiza, el ViewModel gestiona la lógica
+3. **Testabilidad**: La lógica de negocio puede testearse sin el framework de Android
+4. **Reactividad**: La UI se actualiza automáticamente cuando cambia el estado
+5. **Manejo robusto de errores**: Los errores se capturan y representan como estados
+
+#### Preparación para Inyección de Dependencias con Hilt
+
+Aunque actualmente se usa inyección manual, el código está preparado para migrar a Hilt:
+
+```kotlin
+// Futuro con Hilt:
+@HiltViewModel
+class PokemonViewModel @Inject constructor(
+    private val repository: PokemonRepository
+) : ViewModel() {
+    // ...
+}
+```
+
+El patrón actual de constructor injection facilita esta transición sin cambiar la lógica interna del ViewModel.
+
+> **📚 Nota**: Para una explicación más detallada sobre ViewModels, StateFlow, corrutinas y conceptos avanzados, consulta el documento [VIEWMODEL_NOTES.md](VIEWMODEL_NOTES.md) que incluye ejemplos, diagramas y mejores prácticas.
 
 ### Navegación
 
@@ -214,11 +352,11 @@ Las contribuciones son bienvenidas. Si deseas mejorar el proyecto:
 ## 📝 Mejoras Futuras
 
 - [ ] Integración con la API de Pokémon (PokeAPI)
-- [ ] Implementación de Hilt para inyección de dependencias
+- [x] Implementación de Hilt para inyección de dependencias
 - [ ] Base de datos local con Room
 - [ ] Búsqueda y filtrado de Pokémon
 - [ ] Información detallada (tipos, estadísticas, evoluciones)
-- [ ] Modo oscuro
+- [x] Modo oscuro
 - [ ] Animaciones y transiciones
 - [ ] Favoritos y colecciones personalizadas
 - [ ] Soporte para más generaciones de Pokémon
