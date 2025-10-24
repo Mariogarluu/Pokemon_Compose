@@ -4,11 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -25,23 +22,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             PokemonTheme {
                 val navController = rememberNavController()
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold { innerPadding ->
                     NavHost(
                         navController = navController,
                         startDestination = "PokemonList",
-                        modifier = Modifier.padding(innerPadding)
+                        modifier = Modifier
                     ) {
                         composable("PokemonList") {
                             PokemonListScreen(navController = navController)
                         }
                         composable(
-                            route = "Pokemon/{PokemonId}",
+                            "Pokemon/{PokemonId}",
                             arguments = listOf(navArgument("PokemonId") { type = NavType.LongType })
                         ) { backStackEntry ->
-                            val pokemonId = backStackEntry.arguments?.getLong("PokemonId")
-                            if (pokemonId != null) {
-                                PokemonDetailScreen(PokemonId = pokemonId, navController = navController)
-                            }
+                            val id = backStackEntry.arguments?.getLong("PokemonId") ?: 0L
+                            PokemonDetailScreen(PokemonId = id, navController = navController)
                         }
                     }
                 }
