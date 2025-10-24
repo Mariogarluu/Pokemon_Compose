@@ -14,9 +14,7 @@ class PokemonViewModel(
     private val repository: PokemonRepository = PokemonInMemoryRepository()
 ) : ViewModel() {
 
-    // Estado privado mutable
     private val _uiState = MutableStateFlow<PokemonUiState>(PokemonUiState.Idle)
-    // Estado público inmutable para la UI
     val uiState: StateFlow<PokemonUiState> = _uiState
 
     fun loadPokemons() {
